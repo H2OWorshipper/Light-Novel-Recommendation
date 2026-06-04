@@ -195,7 +195,7 @@ if "recommendations" in st.session_state:
     # -----------------------------
     if liked_from_recs:
         metrics = compute_metrics(recommendations, liked_from_recs)
-        st.write("## 📊 Evaluation Results")
+        st.write("## 📊 Evaluation Results (Sementara saja)")
         st.write(metrics)
     else:
         metrics = {}

@@ -18,7 +18,7 @@ import streamlit as st
 warnings.filterwarnings('ignore')
 
 # -------------------------------
-# Remove similar titles(sequel)
+# Remove similar titles(currently not implemented)
 # -------------------------------
 def is_similar_title(title1, title2, threshold=0.75):
     title1 = str(title1).lower().strip()
@@ -132,7 +132,6 @@ def create_features(df):
     genre_series = df['genres'].str.split(',')
     mlb = MultiLabelBinarizer()
     genre_features = mlb.fit_transform(genre_series)
-    genre_df = pd.DataFrame(genre_features, columns=mlb.classes_)
     
     df['clean_synopsis'] = df['synopsis'].apply(preprocess_synopsis)
     tfidf = TfidfVectorizer(max_features=1000, stop_words='english', min_df=2)
@@ -333,7 +332,7 @@ def recommend(liked_titles, X, titles, title_to_idx, df, disliked_titles=None, t
     return top_results, clf, explanations, feature_importances
 
 # -------------------------------
-# Evaluation metrics
+# Evaluation metrics(Old, Not used currently)
 # -------------------------------
 def evaluate_recommendations(X, titles, title_to_idx, test_ratio=0.2, top_k=50):
     all_indices = list(range(X.shape[0]))
@@ -510,64 +509,6 @@ def print_explanation(recommendations, explanations):
             print(f"    - {feat_name}: {diff:+.4f}")
         print()
 
-# -------------------------------
-# Main execution
-# -------------------------------
-def main(csv_path, liked_titles, top_k=50):
-    df = load_and_clean_data(csv_path)
-    X, titles, title_to_idx, feature_objs = create_features(df)
-    
-    recommendations, model, explanations, feature_importances = recommend(
-        liked_titles, X, titles, title_to_idx, top_k=top_k
-    )
-
-    recommendations = rerank_results(recommendations, df, title_to_idx)
-    
-    print("\n=== Top Recommendations ===")
-    for i, (title, prob) in enumerate(recommendations, 1):
-        print(f"{i}. {title} (relevance score: {prob:.4f})")
-    
-    plot_feature_importance(feature_importances, top_n=20, title="Global Feature Importance")
-    
-    print_explanation(recommendations, explanations)
-    
-    print("\n=== Model Evaluation (Simulated User) ===")
-    metrics = evaluate_recommendations(X, titles, title_to_idx, test_ratio=0.2, top_k=top_k)
-    for k, v in metrics.items():
-        print(f"{k}: {v:.4f}")
-    
-    return recommendations
-
-def rerank_results(results, df, title_to_idx, alpha=0.7, beta=0.2, gamma=0.1):
-    reranked = []
-
-    max_pop = df['popularty'].max() if 'popularty' in df.columns else 1
-
-    selected_genres = []
-
-    for title, score in results:
-        idx = title_to_idx[title]
-        row = df.iloc[idx]
-
-        # Popularity
-        popularity = row.get('popularty', 0) / max_pop if max_pop > 0 else 0
-
-        # Genre diversity penalty
-        genres = set(str(row['genres']).split(","))
-        overlap_penalty = 0
-
-        for g in selected_genres:
-            overlap = len(genres.intersection(g))
-            overlap_penalty += overlap * 0.05
-
-        final_score = (alpha * score) + (beta * popularity) - (gamma * overlap_penalty)
-
-        reranked.append((title, final_score))
-        selected_genres.append(genres)
-
-    reranked.sort(key=lambda x: x[1], reverse=True)
-    return reranked
-
 def get_decision_path_text(model, feature_names):
     tree = model.estimators_[0]
     return export_text(tree, feature_names=list(feature_names), max_depth=3)
@@ -615,7 +556,70 @@ def generate_explanations(df, recommendations, liked_titles, title_to_idx):
         explanations[title] = reasons[:2]
 
     return explanations
+# -------------------------------
+# Main execution(For local, outdated)
+# -------------------------------
+def main(csv_path, liked_titles, top_k=50):
+    df = load_and_clean_data(csv_path)
+    X, titles, title_to_idx, feature_objs = create_features(df)
+    
+    recommendations, model, explanations, feature_importances = recommend(
+        liked_titles, X, titles, title_to_idx, top_k=top_k
+    )
 
+    recommendations = rerank_results(recommendations, df, title_to_idx)
+    
+    print("\n=== Top Recommendations ===")
+    for i, (title, prob) in enumerate(recommendations, 1):
+        print(f"{i}. {title} (relevance score: {prob:.4f})")
+    
+    plot_feature_importance(feature_importances, top_n=20, title="Global Feature Importance")
+    
+    print_explanation(recommendations, explanations)
+    
+    print("\n=== Model Evaluation (Simulated User) ===")
+    metrics = evaluate_recommendations(X, titles, title_to_idx, test_ratio=0.2, top_k=top_k)
+    for k, v in metrics.items():
+        print(f"{k}: {v:.4f}")
+    
+    return recommendations
+
+# -------------------------------
+# Reranking
+# -------------------------------
+def rerank_results(results, df, title_to_idx, alpha=0.7, beta=0.2, gamma=0.1):
+    reranked = []
+
+    max_pop = df['popularty'].max() if 'popularty' in df.columns else 1
+
+    selected_genres = []
+
+    for title, score in results:
+        idx = title_to_idx[title]
+        row = df.iloc[idx]
+
+        # Popularity
+        popularity = row.get('popularty', 0) / max_pop if max_pop > 0 else 0
+
+        # Genre diversity penalty
+        genres = set(str(row['genres']).split(","))
+        overlap_penalty = 0
+
+        for g in selected_genres:
+            overlap = len(genres.intersection(g))
+            overlap_penalty += overlap * 0.05
+
+        final_score = (alpha * score) + (beta * popularity) - (gamma * overlap_penalty)
+
+        reranked.append((title, final_score))
+        selected_genres.append(genres)
+
+    reranked.sort(key=lambda x: x[1], reverse=True)
+    return reranked
+
+# -------------------------------
+# Google Sheet
+# -------------------------------
 def get_gsheet_client():
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -648,6 +652,9 @@ def send_to_google_sheets(feedback, liked_titles, metrics, liked_from_recs):
         metrics.get("ndcg", "")
     ])
 
+# -------------------------------
+# Evaluation
+# -------------------------------
 def compute_metrics(recommendations, liked_from_recs, top_k=10):
     recommended_titles = [title for title, _ in recommendations[:top_k]]
 
@@ -696,6 +703,9 @@ def compute_metrics(recommendations, liked_from_recs, top_k=10):
         "ndcg": round(ndcg, 4)
     }
 
+# -------------------------------
+# Tuning
+# -------------------------------
 def tune_random_forest(X, y):
     param_grid = {
         "n_estimators": [50, 100],
@@ -723,7 +733,7 @@ def tune_random_forest(X, y):
     return best_params, best_score
 
 # -------------------------------
-# Hard Testing
+# Hard Testing(Local, Outdated)
 # -------------------------------
 if __name__ == "__main__":
     csv_file = "novels.csv"
