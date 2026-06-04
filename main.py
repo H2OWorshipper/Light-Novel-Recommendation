@@ -265,7 +265,7 @@ def recommend(liked_titles, X, titles, title_to_idx, df, disliked_titles=None, t
     if len(disliked_idx) > 0:
         neg_idx = disliked_idx
 
-        needed = len(liked_idx)/2 - len(neg_idx)
+        needed = len(liked_idx) - len(neg_idx)
 
         if needed>0:
             hard_negatives = get_hard_negatives(
@@ -278,7 +278,7 @@ def recommend(liked_titles, X, titles, title_to_idx, df, disliked_titles=None, t
         neg_idx = get_hard_negatives(
             df,
             liked_idx,
-            len(liked_idx)/2
+            int(len(liked_idx)/2)
         )
 
         if neg_idx is None:
@@ -288,7 +288,7 @@ def recommend(liked_titles, X, titles, title_to_idx, df, disliked_titles=None, t
 
             neg_idx = np.random.choice(
                 neg_candidates,
-                size=len(liked_idx)/2,
+                size=int(len(liked_idx)/2),
                 replace=False
             )
     X_neg = X[neg_idx]
@@ -404,9 +404,6 @@ def get_explainable_feature_importance(model, feature_names, top_n=10):
         top_features_df
         grouped_importance_df
     """
-
-    import pandas as pd
-
     importances = model.feature_importances_
 
     fi_df = pd.DataFrame({
