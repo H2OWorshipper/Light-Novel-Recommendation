@@ -10,6 +10,7 @@ from main import (
     recommend,
     rerank_results,
     send_to_google_sheets,
+    get_explainable_feature_importance
 )
 
 st.title("📚 Light Novel Recommendation System")
@@ -21,7 +22,7 @@ st.title("📚 Light Novel Recommendation System")
 def load_data():
     df = load_and_clean_data("novels.csv")
     df.columns = df.columns.str.lower().str.strip()
-    X, titles, title_to_idx, idx_to_title, feature_objs = create_features(df)
+    X, titles, title_to_idx, feature_objs = create_features(df)
     return df, X, titles, title_to_idx, feature_objs
 
 df, X, titles, title_to_idx, feature_objs = load_data()
@@ -32,6 +33,9 @@ df, X, titles, title_to_idx, feature_objs = load_data()
 st.write("### Select novels you like:")
 liked_titles = st.multiselect("Choose novels you like", titles)
 
+st.write("### Select novels you dislike (optional):")
+disliked_titles = st.multiselect("Choose novels you dislike", titles)
+
 # -----------------------------
 # Generate Recommendations
 # -----------------------------
@@ -40,7 +44,7 @@ if st.button("Get Recommendations"):
         st.warning("Please select at least one novel.")
     else:
         recommendations, model, _, _ = recommend(
-            liked_titles, X, titles, title_to_idx, top_k=50
+            liked_titles, X, titles, title_to_idx, df, disliked_titles=disliked_titles
         )
 
         # Store in session_state
@@ -73,6 +77,7 @@ if "recommendations" in st.session_state:
         st.markdown(f"""
         <div style="padding:20px; border-radius:15px; background:#1f2937; margin-bottom:20px;">
             <h2>#{i} - {title}</h2>
+            <h1>{score}</h1>
             {"<img src='" + img + "' width='200'>" if img else ""}
             <p><b>Author:</b> {row.get('authors', 'Unknown')}</p>
             <p>{' | '.join(explanations.get(title, ["No explanation"]))}</p>
@@ -90,6 +95,7 @@ if "recommendations" in st.session_state:
             st.markdown(f"""
             <div style="padding:15px; border-radius:10px; background:#111827; margin-bottom:15px;">
                 <h4>#{rank} - {title}</h4>
+                <h3>{score}</h3>
                 {"<img src='" + img + "' width='150'>" if img else ""}
                 <p>{row.get('authors','')}</p>
                 <p>{' | '.join(explanations.get(title, ["No explanation"]))}</p>
@@ -107,6 +113,7 @@ if "recommendations" in st.session_state:
             "Title": title,
             "English Title": row.get("title_eng", ""),
             "Author": row.get("authors", ""),
+            "Relevance Score": score
         })
 
     st.write("## 📊 More Recommendations")
@@ -116,24 +123,59 @@ if "recommendations" in st.session_state:
     # Visualization and Result Interpretation
     # -----------------------------
     st.write("## 📊 Feature Importance")
-    feature_importances = model.feature_importances_
+    # feature_importances = model.feature_importances_
 
-    feature_names = feature_objs["feature_names"]
+    # feature_names = feature_objs["feature_names"]
 
-    fi_df = pd.DataFrame({
-        "feature": feature_names,
-        "importance": feature_importances
-    }).sort_values(by="importance", ascending=False).head(20)
+    # fi_df = pd.DataFrame({
+    #     "feature": feature_names,
+    #     "importance": feature_importances
+    # }).sort_values(by="importance", ascending=False).head(20)
 
-    st.bar_chart(fi_df.set_index("feature"))
+    # st.bar_chart(fi_df.set_index("feature"))
 
-    st.write("## 🌳 Decision Path (Sample Tree)")
+    # st.write("## 🌳 Decision Path (Sample Tree)")
 
-    tree_text = get_decision_path_text(
-        model,
-        feature_objs["feature_names"]
+    # tree_text = get_decision_path_text(
+    #     model,
+    #     feature_objs["feature_names"]
+    # )
+    # st.text(tree_text)
+
+    top_features_df, grouped_importance_df = (
+        get_explainable_feature_importance(
+            model,
+            feature_objs["feature_names"]
+        )
     )
-    st.text(tree_text)
+
+    for _, row in top_features_df.iterrows():
+        importance_pct = row["importance"] * 100
+
+        st.markdown(
+            f"""
+            ✅ **{row['display_name']}**
+            - Influence Score: {importance_pct:.2f}%
+            """
+        )
+    
+    st.bar_chart(
+        grouped_importance_df.set_index("Factor")[
+            "Percentage"
+        ]
+    )
+
+    dominant_factor = grouped_importance_df.loc[
+        grouped_importance_df["Percentage"].idxmax()
+    ]
+
+    st.info(
+        f"""
+        Most recommendations were influenced by
+        **{dominant_factor['Factor']}**
+        ({dominant_factor['Percentage']:.1f}%).
+        """
+    )
 
     # -----------------------------
     # User selects liked recommendations

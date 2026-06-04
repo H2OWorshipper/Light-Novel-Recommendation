@@ -181,32 +181,116 @@ def create_features(df):
     ])
     
     title_to_idx = {title: idx for idx, title in enumerate(df['title'])}
-    idx_to_title = df['title'].to_dict()
     
-    return X, df['title'].values, title_to_idx, idx_to_title, {
+    return X, df['title'].values, title_to_idx, {
         'genre_columns': mlb.classes_,
         'tfidf': tfidf,
         'status_ohe': status_ohe if 'status' in df.columns else None,
         'feature_names': feature_names,
     }
 
+def get_hard_negatives(df, liked_idx, n_samples):
+
+    liked_genres = set()
+
+    for idx in liked_idx:
+
+        genres = str(
+            df.iloc[idx]["genres"]
+        ).split(",")
+
+        liked_genres.update(
+            g.strip().lower()
+            for g in genres
+        )
+
+    hard_candidates = []
+
+    for idx in range(len(df)):
+
+        if idx in liked_idx:
+            continue
+
+        novel_genres = set(
+            g.strip().lower()
+            for g in str(
+                df.iloc[idx]["genres"]
+            ).split(",")
+        )
+
+        overlap = len(
+            liked_genres.intersection(
+                novel_genres
+            )
+        )
+
+        if overlap <= 1:
+            hard_candidates.append(idx)
+
+    if len(hard_candidates) >= n_samples:
+        return np.random.choice(
+            hard_candidates,
+            size=n_samples,
+            replace=False
+        )
+
+    return None
+
 # -------------------------------
 # Recommendation using Random Forest
 # -------------------------------
-def recommend(liked_titles, X, titles, title_to_idx, top_k=50, n_estimators=100, max_depth=10):
+def recommend(liked_titles, X, titles, title_to_idx, df, disliked_titles=None, top_k=50):
     liked_idx = [title_to_idx[t] for t in liked_titles if t in title_to_idx]
     if len(liked_idx) == 0:
         raise ValueError("None of the liked titles found in dataset.")
     
+    if disliked_titles is None:
+        disliked_titles = []
+
+    disliked_idx = [
+        title_to_idx[t]
+        for t in disliked_titles
+        if t in title_to_idx
+    ]
+
     X_pos = X[liked_idx]
     y_pos = np.ones(len(liked_idx))
     
     all_idx = set(range(X.shape[0]))
-    neg_candidates = list(all_idx - set(liked_idx))
-    if len(neg_candidates) < len(liked_idx):
-        neg_idx = np.random.choice(neg_candidates, size=len(liked_idx), replace=True)
+    # neg_candidates = list(all_idx - set(liked_idx))
+    # if len(neg_candidates) < len(liked_idx):
+    #     neg_idx = np.random.choice(neg_candidates, size=len(liked_idx), replace=True)
+    # else:
+    #     neg_idx = np.random.choice(neg_candidates, size=len(liked_idx), replace=False)
+    if len(disliked_idx) > 0:
+        neg_idx = disliked_idx
+
+        needed = len(liked_idx)/2 - len(neg_idx)
+
+        if needed>0:
+            hard_negatives = get_hard_negatives(
+                df,
+                liked_idx,
+                needed
+            )
+            neg_idx.extend(hard_negatives)
     else:
-        neg_idx = np.random.choice(neg_candidates, size=len(liked_idx), replace=False)
+        neg_idx = get_hard_negatives(
+            df,
+            liked_idx,
+            len(liked_idx)/2
+        )
+
+        if neg_idx is None:
+            neg_candidates = list(
+                all_idx - set(liked_idx)
+            )
+
+            neg_idx = np.random.choice(
+                neg_candidates,
+                size=len(liked_idx)/2,
+                replace=False
+            )
     X_neg = X[neg_idx]
     y_neg = np.zeros(len(neg_idx))
     
@@ -275,7 +359,6 @@ def evaluate_recommendations(X, titles, title_to_idx, test_ratio=0.2, top_k=50):
     candidate_indices = list(set(all_indices) - set(train_liked))
     candidate_scores = [(idx, scores[idx]) for idx in candidate_indices]
     candidate_scores.sort(key=lambda x: x[1], reverse=True)
-    top_k_indices = [idx for idx, _ in candidate_scores[:top_k]]
     
     y_true = np.zeros(len(candidate_indices))
     for i, idx in enumerate(candidate_indices):
@@ -300,7 +383,7 @@ def evaluate_recommendations(X, titles, title_to_idx, test_ratio=0.2, top_k=50):
         'MAP': map_score,
         'NDCG': ndcg,
         'Precision': precision
-    }, clf
+    }
 
 # -------------------------------
 # Visualization (Explainability)
@@ -314,6 +397,112 @@ def plot_feature_importance(feature_importances, top_n=20, title="Feature Import
     plt.title(title)
     plt.tight_layout()
     plt.show()
+
+def get_explainable_feature_importance(model, feature_names, top_n=10):
+    """
+    Returns:
+        top_features_df
+        grouped_importance_df
+    """
+
+    import pandas as pd
+
+    importances = model.feature_importances_
+
+    fi_df = pd.DataFrame({
+        "feature": feature_names,
+        "importance": importances
+    })
+
+    fi_df = fi_df.sort_values(
+        by="importance",
+        ascending=False
+    )
+
+    # -------------------------
+    # Human-readable labels
+    # -------------------------
+
+    def prettify_feature(feature):
+
+        if feature.startswith("genre_"):
+            return f"Genre: {feature.replace('genre_', '').title()}"
+
+        elif feature.startswith("synopsis_"):
+            return f"Story Theme: {feature.replace('synopsis_', '').title()}"
+
+        elif feature.startswith("status_"):
+            return f"Status: {feature.replace('status_', '').replace('_', ' ').title()}"
+
+        elif feature == "score":
+            return "Novel Rating"
+
+        elif feature == "favorites":
+            return "Reader Favorites"
+
+        elif feature == "scored_by":
+            return "Number of Ratings"
+
+        elif feature == "popularty":
+            return "Popularity"
+
+        elif feature == "year_start":
+            return "Publication Year"
+
+        elif feature == "n_chapters":
+            return "Number of Chapters"
+
+        elif feature == "n_volumes":
+            return "Number of Volumes"
+
+        return feature
+
+    fi_df["display_name"] = fi_df["feature"].apply(
+        prettify_feature
+    )
+
+    top_features_df = fi_df.head(top_n)
+
+    # -------------------------
+    # Group by feature type
+    # -------------------------
+
+    groups = {
+        "Genres": 0,
+        "Story Themes": 0,
+        "Novel Statistics": 0,
+        "Publication Status": 0
+    }
+
+    for _, row in fi_df.iterrows():
+
+        feature = row["feature"]
+        importance = row["importance"]
+
+        if feature.startswith("genre_"):
+            groups["Genres"] += importance
+
+        elif feature.startswith("synopsis_"):
+            groups["Story Themes"] += importance
+
+        elif feature.startswith("status_"):
+            groups["Publication Status"] += importance
+
+        else:
+            groups["Novel Statistics"] += importance
+
+    grouped_importance_df = pd.DataFrame({
+        "Factor": groups.keys(),
+        "Importance": groups.values()
+    })
+
+    grouped_importance_df["Percentage"] = (
+        grouped_importance_df["Importance"]
+        / grouped_importance_df["Importance"].sum()
+        * 100
+    )
+
+    return top_features_df, grouped_importance_df
 
 def print_explanation(recommendations, explanations):
     print("\n=== Recommendations with Explanations ===\n")
@@ -329,7 +518,7 @@ def print_explanation(recommendations, explanations):
 # -------------------------------
 def main(csv_path, liked_titles, top_k=50):
     df = load_and_clean_data(csv_path)
-    X, titles, title_to_idx, idx_to_title, feature_objs = create_features(df)
+    X, titles, title_to_idx, feature_objs = create_features(df)
     
     recommendations, model, explanations, feature_importances = recommend(
         liked_titles, X, titles, title_to_idx, top_k=top_k
@@ -346,25 +535,9 @@ def main(csv_path, liked_titles, top_k=50):
     print_explanation(recommendations, explanations)
     
     print("\n=== Model Evaluation (Simulated User) ===")
-    metrics, eval_model = evaluate_recommendations(X, titles, title_to_idx, test_ratio=0.2, top_k=top_k)
+    metrics = evaluate_recommendations(X, titles, title_to_idx, test_ratio=0.2, top_k=top_k)
     for k, v in metrics.items():
         print(f"{k}: {v:.4f}")
-    all_indices = list(range(X.shape[0]))
-    liked_idx = np.random.choice(all_indices, size=int(len(all_indices)*0.2), replace=False)
-    train_liked, test_liked = train_test_split(liked_idx, test_size=0.2, random_state=42)
-    X_pos = X[train_liked]
-    y_pos = np.ones(len(train_liked))
-    neg_idx = np.random.choice(list(set(all_indices)-set(train_liked)), size=len(train_liked), replace=False)
-    X_neg = X[neg_idx]
-    y_neg = np.zeros(len(neg_idx))
-    X_train = vstack([X_pos, X_neg])
-    y_train = np.concatenate([y_pos, y_neg])
-    clf_cv = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
-    clf_cv.fit(X_train, y_train)
-    test_neg = np.random.choice(list(set(all_indices)-set(train_liked)-set(test_liked)), size=len(test_liked), replace=False)
-    X_test = vstack([X[test_liked], X[test_neg]])
-    y_test = np.concatenate([np.ones(len(test_liked)), np.zeros(len(test_neg))])
-    y_pred = clf_cv.predict(X_test)
     
     return recommendations
 
