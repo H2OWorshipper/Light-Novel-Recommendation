@@ -82,7 +82,7 @@ def load_and_clean_data(filepath):
     # Fill text columns
     text_cols = [
         'title', 'title_eng', 'authors',
-        'genres', 'synopsis', 'status', 'image'
+        'genres', 'status', 'image'
     ]
 
     for col in text_cols:
@@ -92,19 +92,20 @@ def load_and_clean_data(filepath):
     # Fill numeric columns
     num_cols = [
         'score', 'scored_by', 'popularty',
-        'favorites', 'year_start',
-        'n_chapters', 'n_volumes'
+        'favorites', 'n_chapters', 'n_volumes', 'year_start'
     ]
 
     for col in num_cols:
         if col in df.columns:
-            df[col] = df[col].fillna(0)
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = df[col].fillna(df[col].median())
 
     df = df.drop_duplicates(subset=['title'])
+    df['synopsis'] = df['synopsis'].apply(preprocess_synopsis)
 
     # suspicious_pairs = find_similar_titles(df)
     # df = remove_sequel_duplicates(df, suspicious_pairs)
-
+    # sequel tidak dipakai krn msh dipertimbangkan
     df = df.reset_index(drop=True)
 
     assert df.isnull().sum().sum() == 0, "Dataset still contains missing values"
@@ -113,9 +114,6 @@ def load_and_clean_data(filepath):
 
     return df
 
-# -------------------------------
-# Feature Engineering
-# -------------------------------
 def preprocess_synopsis(text):
     text = str(text).lower()
 
@@ -128,26 +126,22 @@ def preprocess_synopsis(text):
 
     return ' '.join(words)
 
+# -------------------------------
+# Feature Engineering
+# -------------------------------
 def create_features(df):
     genre_series = df['genres'].str.split(',')
     mlb = MultiLabelBinarizer()
     genre_features = mlb.fit_transform(genre_series)
-    
-    df['clean_synopsis'] = df['synopsis'].apply(preprocess_synopsis)
-    tfidf = TfidfVectorizer(max_features=1000, stop_words='english', min_df=2)
-    syn_features = tfidf.fit_transform(df['clean_synopsis'])
+
+    tfidf = TfidfVectorizer(max_features=1000, min_df=2)
+    syn_features = tfidf.fit_transform(df['synopsis'])
     
     num_cols = ['score', 'scored_by', 'popularty', 'favorites', 'year_start', 'n_chapters', 'n_volumes']
-    for col in num_cols:
-        if col not in df.columns:
-            df[col] = 0
-    num_data = df[num_cols].fillna(0).values
+    num_data = df[num_cols].to_numpy(dtype=np.float64)
     
-    if 'status' in df.columns:
-        status_ohe = OneHotEncoder(sparse_output=True, handle_unknown='ignore')
-        status_features = status_ohe.fit_transform(df[['status']])
-    else:
-        status_features = csr_matrix((len(df), 0))
+    status_ohe = OneHotEncoder(sparse_output=True, handle_unknown='ignore')
+    status_features = status_ohe.fit_transform(df[['status']])
     
     genre_feature_names = [f"genre_{g}" for g in mlb.classes_]
 
@@ -240,8 +234,6 @@ def get_hard_negatives(df, liked_idx, n_samples):
 # -------------------------------
 def recommend(liked_titles, X, titles, title_to_idx, df, disliked_titles=None, top_k=50):
     liked_idx = [title_to_idx[t] for t in liked_titles if t in title_to_idx]
-    if len(liked_idx) == 0:
-        raise ValueError("None of the liked titles found in dataset.")
     
     if disliked_titles is None:
         disliked_titles = []
@@ -590,7 +582,7 @@ def main(csv_path, liked_titles, top_k=50):
 def rerank_results(results, df, title_to_idx, alpha=0.7, beta=0.2, gamma=0.1):
     reranked = []
 
-    max_pop = df['popularty'].max() if 'popularty' in df.columns else 1
+    max_pop = np.log1p(df["popularty"]).max() if 'popularty' in df.columns else 1
 
     selected_genres = []
 
@@ -598,8 +590,8 @@ def rerank_results(results, df, title_to_idx, alpha=0.7, beta=0.2, gamma=0.1):
         idx = title_to_idx[title]
         row = df.iloc[idx]
 
-        # Popularity
-        popularity = row.get('popularty', 0) / max_pop if max_pop > 0 else 0
+        # Popularity Normalization
+        popularity = np.log1p(row["popularty"]) / max_pop
 
         # Genre diversity penalty
         genres = set(str(row['genres']).split(","))
@@ -708,8 +700,8 @@ def compute_metrics(recommendations, liked_from_recs, top_k=10):
 # -------------------------------
 def tune_random_forest(X, y):
     param_grid = {
-        "n_estimators": [50, 100],
-        "max_depth": [5, 10, None],
+        "max_depth": [10, 20, None],
+        "min_samples_leaf": [1, 2, 4],
         "min_samples_split": [2, 5]
     }
 
@@ -719,8 +711,9 @@ def tune_random_forest(X, y):
     for params in ParameterGrid(param_grid):
         clf = RandomForestClassifier(
             **params,
+            n_estimators=100,
             random_state=42,
-            n_jobs=-1
+            n_jobs=-1,
         )
         clf.fit(X, y)
         preds = clf.predict(X)

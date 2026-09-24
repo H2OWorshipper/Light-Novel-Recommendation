@@ -21,7 +21,7 @@ st.title("📚 Light Novel Recommendation System")
 @st.cache_data
 def load_data():
     df = load_and_clean_data("novels.csv")
-    df.columns = df.columns.str.lower().str.strip()
+    # df.columns = df.columns.str.lower().str.strip()
     X, titles, title_to_idx, feature_objs = create_features(df)
     return df, X, titles, title_to_idx, feature_objs
 
@@ -30,11 +30,68 @@ df, X, titles, title_to_idx, feature_objs = load_data()
 # -----------------------------
 # User Input
 # -----------------------------
+
+all_titles = titles
+
+if "liked_titles" not in st.session_state:
+    st.session_state["liked_titles"] = []
+
+if "disliked_titles" not in st.session_state:
+    st.session_state["disliked_titles"] = []
+
+def update_liked():
+    liked = st.session_state["liked_titles"]
+
+    # Remove newly liked titles from disliked
+    st.session_state["disliked_titles"] = [
+        title
+        for title in st.session_state["disliked_titles"]
+        if title not in liked
+    ]
+
+
+def update_disliked():
+    disliked = st.session_state["disliked_titles"]
+
+    # Remove newly disliked titles from liked
+    st.session_state["liked_titles"] = [
+        title
+        for title in st.session_state["liked_titles"]
+        if title not in disliked
+    ]
+
+liked_options = [
+    title
+    for title in all_titles
+    if title not in st.session_state["disliked_titles"]
+]
+
+disliked_options = [
+    title
+    for title in all_titles
+    if title not in st.session_state["liked_titles"]
+]
+
 st.write("### Select novels you like:")
-liked_titles = st.multiselect("Choose novels you like", titles)
+
+st.multiselect(
+    "Choose novels you like",
+    options=liked_options,
+    key="liked_titles",
+    on_change=update_liked
+)
 
 st.write("### Select novels you dislike (optional):")
-disliked_titles = st.multiselect("Choose novels you dislike", titles)
+
+st.multiselect(
+    "Choose novels you dislike",
+    options=disliked_options,
+    key="disliked_titles",
+    on_change=update_disliked
+)
+
+liked_titles = st.session_state["liked_titles"]
+disliked_titles = st.session_state["disliked_titles"]
 
 # -----------------------------
 # Generate Recommendations
@@ -50,7 +107,6 @@ if st.button("Get Recommendations"):
         # Store in session_state
         st.session_state["recommendations"] = recommendations
         st.session_state["model"] = model
-        st.session_state["liked_titles"] = liked_titles
 
 # -----------------------------
 # If recommendations exist → display everything
@@ -180,51 +236,45 @@ if "recommendations" in st.session_state:
     # -----------------------------
     # User selects liked recommendations
     # -----------------------------
-    st.write("## ✅ Select the recommendations you actually like")
+    # st.write("## ✅ Select the recommendations you actually like")
 
-    recommended_titles = [title for title, _ in recommendations[:50]]
+    # recommended_titles = [title for title, _ in recommendations[:50]]
 
-    liked_from_recs = st.multiselect(
-        "Pick any recommendations you like:",
-        recommended_titles,
-        key="liked_from_recs"
-    )
+    # liked_from_recs = st.multiselect(
+    #     "Pick any recommendations you like:",
+    #     recommended_titles,
+    #     key="liked_from_recs"
+    # )
 
-    # -----------------------------
-    # Metrics display
-    # -----------------------------
-    if liked_from_recs:
-        metrics = compute_metrics(recommendations, liked_from_recs)
-        st.write("## 📊 Evaluation Results (Sementara saja)")
-        st.write(metrics)
-    else:
-        metrics = {}
+    # if liked_from_recs:
+    #     metrics = compute_metrics(recommendations, liked_from_recs)
+    #     st.write("## 📊 Evaluation Results (Sementara saja)")
+    #     st.write(metrics)
+    # else:
+    #     metrics = {}
 
     # -----------------------------
     # Feedback form
     # -----------------------------
-    st.write("## 📝 Feedback")
+    # st.write("## 📝 Feedback")
 
-    accuracy = st.slider("Accuracy", 1, 5, 3)
-    diversity = st.slider("Diversity", 1, 5, 3)
-    serendipity = st.slider("Serendipity", 1, 5, 3)
+    # accuracy = st.slider("Accuracy", 1, 5, 3)
+    # diversity = st.slider("Diversity", 1, 5, 3)
+    # serendipity = st.slider("Serendipity", 1, 5, 3)
 
-    # -----------------------------
-    # Submit feedback
-    # -----------------------------
-    if st.button("Submit Feedback", key="submit_feedback"):
+    # if st.button("Submit Feedback", key="submit_feedback"):
 
-        feedback = {
-            "accuracy": accuracy,
-            "diversity": diversity,
-            "serendipity": serendipity
-        }
+    #     feedback = {
+    #         "accuracy": accuracy,
+    #         "diversity": diversity,
+    #         "serendipity": serendipity
+    #     }
 
-        send_to_google_sheets(
-            feedback,
-            liked_titles,
-            metrics,
-            liked_from_recs
-        )
+    #     send_to_google_sheets(
+    #         feedback,
+    #         liked_titles,
+    #         metrics,
+    #         liked_from_recs
+    #     )
 
-        st.success("✅ Feedback and metrics sent successfully!")
+    #     st.success("✅ Feedback and metrics sent successfully!")
