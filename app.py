@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.tree import plot_tree
 
 from main import (
     compute_metrics,
@@ -190,13 +192,102 @@ if "recommendations" in st.session_state:
 
     # st.bar_chart(fi_df.set_index("feature"))
 
-    # st.write("## 🌳 Decision Path (Sample Tree)")
+        # -----------------------------
+    # Decision Path Visualization
+    # -----------------------------
+    st.write("## 🌳 Decision Path (Random Forest)")
 
-    # tree_text = get_decision_path_text(
-    #     model,
-    #     feature_objs["feature_names"]
-    # )
-    # st.text(tree_text)
+    def pretty_feature(name):
+        if name.startswith("genre_"):
+            return f"Genre: {name[6:].title()}"
+        if name.startswith("synopsis_"):
+            return f"Story Theme: {name[9:].title()}"
+        if name.startswith("status_"):
+            cleaned = name[7:].replace("status_", "").replace("_", " ")
+            return f"Status: {cleaned.title()}"
+        labels = {
+            "score": "Novel Rating",
+            "favorites": "Reader Favorites",
+            "scored_by": "Number of Ratings",
+            "popularty": "Popularity",
+            "year_start": "Publication Year",
+            "n_chapters": "Number of Chapters",
+            "n_volumes": "Number of Volumes",
+        }
+        return labels.get(name, name)
+
+    pretty_names = [pretty_feature(f) for f in feature_objs["feature_names"]]
+    n_trees = len(model.estimators_)
+
+    tree_id = st.slider("Which tree to inspect", 0, n_trees - 1, 0, key="tree_id")
+    tree = model.estimators_[tree_id]
+
+    tab_tree, tab_path = st.tabs(
+        ["Tree structure", "Path for a recommended novel"]
+    )
+
+    with tab_tree:
+        depth_shown = st.slider("Depth shown", 1, 5, 3, key="tree_depth_shown")
+
+        fig, ax = plt.subplots(figsize=(14, 7))
+        plot_tree(
+            tree,
+            feature_names=pretty_names,
+            class_names=["Not liked", "Liked"],
+            max_depth=depth_shown,
+            filled=True,
+            rounded=True,
+            impurity=False,
+            fontsize=8,
+            ax=ax,
+        )
+        st.pyplot(fig)
+        plt.close(fig)
+
+        st.caption(
+            "Each box is a yes/no question about a novel's features. "
+            "Left = condition true, right = condition false. "
+            "Colour shows the majority class in that node."
+        )
+
+    with tab_path:
+        rec_titles = [t for t, _ in recommendations[:50]]
+        chosen = st.selectbox("Pick a recommended novel", rec_titles, key="path_title")
+
+        x = X[title_to_idx[chosen]]
+        x_dense = x.toarray().ravel()
+        node_ids = tree.decision_path(x).indices
+        t = tree.tree_
+
+        steps = []
+        for node in node_ids:
+            if t.children_left[node] == -1:   # reached a leaf
+                break
+
+            f = t.feature[node]
+            thr = t.threshold[node]
+            val = x_dense[f]
+            went_left = val <= thr
+            name = pretty_names[f]
+
+            if feature_objs["feature_names"][f].startswith("genre_"):
+                answer = "has this genre" if val > thr else "does not have this genre"
+                steps.append(f"**{name}** → {answer}")
+            else:
+                op = "≤" if went_left else ">"
+                steps.append(f"**{name}**: {val:.3f} {op} {thr:.3f}")
+
+        if steps:
+            for i, s in enumerate(steps, start=1):
+                st.markdown(f"{i}. {s}")
+        else:
+            st.info("This tree is a single leaf, so there are no splits to show.")
+
+        c1, c2 = st.columns(2)
+        c1.metric("This tree's probability of 'Liked'",
+                  f"{tree.predict_proba(x)[0, 1]:.2f}")
+        c2.metric("Whole forest's probability of 'Liked'",
+                  f"{model.predict_proba(x)[0, 1]:.2f}")
 
     top_features_df, grouped_importance_df = (
         get_explainable_feature_importance(
@@ -236,45 +327,45 @@ if "recommendations" in st.session_state:
     # -----------------------------
     # User selects liked recommendations
     # -----------------------------
-    # st.write("## ✅ Select the recommendations you actually like")
+    st.write("## ✅ Select the recommendations you actually like")
 
-    # recommended_titles = [title for title, _ in recommendations[:50]]
+    recommended_titles = [title for title, _ in recommendations[:50]]
 
-    # liked_from_recs = st.multiselect(
-    #     "Pick any recommendations you like:",
-    #     recommended_titles,
-    #     key="liked_from_recs"
-    # )
+    liked_from_recs = st.multiselect(
+        "Pick any recommendations you like:",
+        recommended_titles,
+        key="liked_from_recs"
+    )
 
-    # if liked_from_recs:
-    #     metrics = compute_metrics(recommendations, liked_from_recs)
-    #     st.write("## 📊 Evaluation Results (Sementara saja)")
-    #     st.write(metrics)
-    # else:
-    #     metrics = {}
+    if liked_from_recs:
+        metrics = compute_metrics(recommendations, liked_from_recs)
+        st.write("## 📊 Evaluation Results (Sementara saja)")
+        st.write(metrics)
+    else:
+        metrics = {}
 
     # -----------------------------
     # Feedback form
     # -----------------------------
-    # st.write("## 📝 Feedback")
+    st.write("## 📝 Feedback")
 
-    # accuracy = st.slider("Accuracy", 1, 5, 3)
-    # diversity = st.slider("Diversity", 1, 5, 3)
-    # serendipity = st.slider("Serendipity", 1, 5, 3)
+    accuracy = st.slider("Accuracy", 1, 5, 3)
+    diversity = st.slider("Diversity", 1, 5, 3)
+    serendipity = st.slider("Serendipity", 1, 5, 3)
 
-    # if st.button("Submit Feedback", key="submit_feedback"):
+    if st.button("Submit Feedback", key="submit_feedback"):
 
-    #     feedback = {
-    #         "accuracy": accuracy,
-    #         "diversity": diversity,
-    #         "serendipity": serendipity
-    #     }
+        feedback = {
+            "accuracy": accuracy,
+            "diversity": diversity,
+            "serendipity": serendipity
+        }
 
-    #     send_to_google_sheets(
-    #         feedback,
-    #         liked_titles,
-    #         metrics,
-    #         liked_from_recs
-    #     )
+        send_to_google_sheets(
+            feedback,
+            liked_titles,
+            metrics,
+            liked_from_recs
+        )
 
-    #     st.success("✅ Feedback and metrics sent successfully!")
+        st.success("✅ Feedback and metrics sent successfully!")
