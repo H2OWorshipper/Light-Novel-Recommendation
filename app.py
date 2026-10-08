@@ -181,18 +181,18 @@ if "recommendations" in st.session_state:
     # Visualization and Result Interpretation
     # -----------------------------
     st.write("## 📊 Feature Importance")
-    # feature_importances = model.feature_importances_
+    feature_importances = model.feature_importances_
 
-    # feature_names = feature_objs["feature_names"]
+    feature_names = feature_objs["feature_names"]
 
-    # fi_df = pd.DataFrame({
-    #     "feature": feature_names,
-    #     "importance": feature_importances
-    # }).sort_values(by="importance", ascending=False).head(20)
+    fi_df = pd.DataFrame({
+        "feature": feature_names,
+        "importance": feature_importances
+    }).sort_values(by="importance", ascending=False).head(20)
 
-    # st.bar_chart(fi_df.set_index("feature"))
+    st.bar_chart(fi_df.set_index("feature"))
 
-        # -----------------------------
+    # -----------------------------
     # Decision Path Visualization
     # -----------------------------
     st.write("## 🌳 Decision Path (Random Forest)")
@@ -227,14 +227,13 @@ if "recommendations" in st.session_state:
     )
 
     with tab_tree:
-        depth_shown = st.slider("Depth shown", 1, 5, 3, key="tree_depth_shown")
-
+        # depth_shown = st.slider("Depth shown", 1, 5, 3, key="tree_depth_shown")
         fig, ax = plt.subplots(figsize=(14, 7))
         plot_tree(
             tree,
             feature_names=pretty_names,
             class_names=["Not liked", "Liked"],
-            max_depth=depth_shown,
+            max_depth=10,
             filled=True,
             rounded=True,
             impurity=False,
